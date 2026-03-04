@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<info>
+    <id>ws_sign_app</id>
+    <name>WebServer Sign Document App</name>
+    <summary>Подписание PDF документов</summary>
+    <description>Приложение для добавления подписей в PDF документы</description>
+    <version>1.0.0</version>
+    <licence>agpl</licence>
+    <author mail="u0827@zaosmm.ru">Мезенцев Павел Викентьевич</author>
+    <namespace>WebServerSignDocApp</namespace>
+    <category>tools</category>
+
+
+    <dependencies>
+        <nextcloud min-version="26" max-version="33"/>
+        <python min-version="3.8" max-version="3.12"/>
+    </dependencies>
+
+    <background-jobs>
+        <job>OCA\WebServerSignDocApp\BackgroundJob\CleanupTempFiles</job>
+    </background-jobs>
+
+    <settings>
+        <admin>OCA\WebServerSignDocApp\Settings\Admin</admin>
+    </settings>
+
+    <external-app>
+        <docker-install>
+            <registry>ghcr.io</registry>
+            <image>zaosmm/nc_ws_sign_app</image>
+            <image-tag>latest</image-tag>
+        </docker-install>
+    </external-app>
+    <!-- Команда для запуска приложения -->
+    <commands>
+        <command>python3 src/main.py</command>
+    </commands>
+</info>

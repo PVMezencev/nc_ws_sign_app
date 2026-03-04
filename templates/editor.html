@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <title>Редактор печати и подписи</title>
+    <script src="https://telegram.org/js/telegram-web-app.js?59"></script>
+    <script src="/assets/js/fabric.5.3.0.min.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="stylesheet" href="/assets/css/editor.css">
+</head>
+<body>
+<div class="controls">
+
+    <div class="upload-section">
+        {% if has_sign %}
+        <button id="sign-exist-file">Вставить подпись</button>
+        {% endif %}
+        <button id="start-signature-canvas" style="background: #28a745;">Нарисовать подпись</button>
+        <button id="get-positions">Применить</button>
+        <button id="zoom_plus" class="zoom_control">+</button>
+        <button id="zoom_minus" class="zoom_control">-</button>
+    </div>
+</div>
+
+<div id="canvas-container">
+    <canvas id="pdf-canvas"></canvas>
+</div>
+
+<div class="controls">
+
+    <div class="upload-section">
+        <div class="pagination-controls">
+            <button id="prev-page">← Стр</button>
+            <span id="page-info">Страница 1</span>
+            <button id="next-page">Стр →</button>
+        </div>
+        <div class="page-thumbnails" id="page-thumbnails"></div>
+    </div>
+</div>
+
+
+<div class="signature-modal" id="signature-modal">
+    <div class="signature-container">
+        <h3>Нарисуйте подпись</h3>
+        <p>Рисуйте мышью или пальцем. Линия будет имитировать шариковую ручку.</p>
+        <div class="signature-canvas-container">
+            <canvas id="signature-canvas"></canvas>
+        </div>
+        <div class="signature-controls">
+            <button id="clear-signature" style="background: #dc3545;">Очистить</button>
+            <button id="save-signature" style="background: #28a745;">Сохранить</button>
+            <button id="close-signature-modal">Отмена</button>
+        </div>
+    </div>
+</div>
+<script>
+    let chat_id = {{ chat_id }}
+    let session_id = {{ session_id }}
+</script>
+<script src="/assets/js/editor.js?v={{ version }}"></script>
+</body>
+</html>
