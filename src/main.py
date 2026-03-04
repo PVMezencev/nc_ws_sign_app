@@ -286,8 +286,7 @@ async def process_document(
             if sign_file.exists():
                 image_source = sign_file
             else:
-                # Дефолтная подпись
-                image_source = ASSETS_DIR / "images" / "sig_alla.png"
+                raise HTTPException(status_code=400, detail="signature file not found")
 
             pdf_data = add_png_pdfrw(
                 image=str(image_source),
@@ -297,26 +296,8 @@ async def process_document(
                 page_number=result.page or 0,
                 page_size=(result.page_size.get('w'), result.page_size.get('h')) if result.page_size else None
             )
-
-        elif pos_type == 'stamp_pravila':
-            pdf_data = add_png_pdfrw(
-                image=str(ASSETS_DIR / "images" / "pravila_pechat.png"),
-                input_data=pdf_data,
-                size=(width, height),
-                position=(left, top),
-                page_number=result.page or 0,
-                page_size=(result.page_size.get('w'), result.page_size.get('h')) if result.page_size else None
-            )
-
-        elif pos_type == 'stamp_rp':
-            pdf_data = add_png_pdfrw(
-                image=str(ASSETS_DIR / "images" / "ruspriority_pechat.png"),
-                input_data=pdf_data,
-                size=(width, height),
-                position=(left, top),
-                page_number=result.page or 0,
-                page_size=(result.page_size.get('w'), result.page_size.get('h')) if result.page_size else None
-            )
+        else:
+            raise HTTPException(status_code=400, detail="unknown operation")
 
     # Сохраняем результат
     output_file = session_dir / "result.pdf"
