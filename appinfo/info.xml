@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <info>
-    <id>ws_sign_app</id>
+    <id>nc_ws_sign_app</id>
     <name>WebServer Sign Document App</name>
     <summary>Подписание PDF документов</summary>
     <description>Приложение для добавления подписей в PDF документы</description>

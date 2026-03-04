@@ -1,28 +1,25 @@
 import base64
 import io
 import json
-import os
 import shutil
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
 
 from fastapi import FastAPI, Request, Depends, HTTPException
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from nc_py_api import NextcloudApp
+from nc_py_api.ex_app import AppAPIAuthMiddleware, LogLvl, run_app, set_handlers, persistent_storage
 from pydantic import BaseModel
 from starlette.responses import StreamingResponse
 
-from nc_py_api import NextcloudApp
-from nc_py_api.ex_app import AppAPIAuthMiddleware, LogLvl, run_app, set_handlers, persistent_storage
-
-from editor import create_image_reader, add_png_pdfrw, convert_scanned_pdf_to_pdf
+from src.editor import add_png_pdfrw, convert_scanned_pdf_to_pdf
 
 # Константы
-APP_NAME = "ws_sign_app"
+APP_NAME = "nc_ws_sign_app"
 DATA_DIR = Path(persistent_storage()) / "data"
 TEMP_DIR = DATA_DIR / "temp"
 ASSETS_DIR = Path(__file__).parent.parent / "assets"
@@ -363,6 +360,23 @@ async def cleanup_session(
 
     return JSONResponse(content={"message": "Cleaned up"})
 
+@app.get("/heartbeat")
+async def heartbeat():
+    """Обязательный endpoint для проверки здоровья"""
+    return {"status": "ok"}
+
+@app.post("/init")
+async def init_app(request: Request, nc: NextcloudApp = Depends(NextcloudApp)):
+    """Обязательный endpoint для инициализации приложения"""
+    # Здесь можно выполнить начальную настройку
+    return {"status": "initialized"}
+
+@app.put("/enabled")
+async def set_enabled(request: Request, nc: NextcloudApp = Depends(NextcloudApp)):
+    """Обязательный endpoint для включения/выключения приложения"""
+    data = await request.json()
+    enabled = data.get("enabled", False)
+    return {"status": "ok", "enabled": enabled}
 
 if __name__ == "__main__":
     run_app("src.main:app", log_level="trace")
