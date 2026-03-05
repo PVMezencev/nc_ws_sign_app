@@ -3,10 +3,10 @@
 <head>
     <title>Редактор печати и подписи</title>
     <script src="https://telegram.org/js/telegram-web-app.js?59"></script>
-    <script src="/assets/js/fabric.5.3.0.min.js"></script>
+    <script src="/exapps/nc_ws_sign_app/assets/js/fabric.5.3.0.min.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <link rel="stylesheet" href="/assets/css/editor.css">
+    <link rel="stylesheet" href="/exapps/nc_ws_sign_app/assets/css/editor.css">
 </head>
 <body>
 <div class="controls">
@@ -15,8 +15,10 @@
         {% if has_sign %}
         <button id="sign-exist-file">Вставить подпись</button>
         {% endif %}
-        <button id="start-signature-canvas" style="background: #28a745;">Нарисовать подпись</button>
-        <button id="get-positions">Применить</button>
+        <input type="file" id="file-upload" accept=".pdf" style="display: none;">
+        <button id="upload-button" style="background: #007bff;">📤 Загрузить PDF</button>
+        <button id="start-signature-canvas" style="background: #28a745;">🎨 Нарисовать подпись</button>
+        <button id="get-positions">✅ Применить</button>
         <button id="zoom_plus" class="zoom_control">+</button>
         <button id="zoom_minus" class="zoom_control">-</button>
     </div>
@@ -54,9 +56,9 @@
     </div>
 </div>
 <script>
-    let chat_id = {{ chat_id }}
-    let session_id = {{ session_id }}
+        let chat_id = "{{chat_id}}"
+        let session_id = "{{session_id}}"
 </script>
-<script src="/assets/js/editor.js?v={{ version }}"></script>
+<script src="/exapps/nc_ws_sign_app/assets/js/editor.js?v={{ version }}"></script>
 </body>
 </html>

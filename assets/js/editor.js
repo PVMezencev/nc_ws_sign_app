@@ -558,7 +558,7 @@ document.addEventListener('DOMContentLoaded', async function () {
 
     async function downloadFile(data, chat_id, session_id, filename = 'document.pdf') {
         try {
-            const response = await fetch(`/result/${chat_id}?session_id=${session_id}`, {
+            const response = await fetch(`/exapps/nc_ws_sign_app/result/?session_id=${session_id}`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -609,7 +609,7 @@ document.addEventListener('DOMContentLoaded', async function () {
 
     async function saveNewSign(data, chat_id) {
         try {
-            const response = await fetch(`/sign/${chat_id}`, {
+            const response = await fetch(`/exapps/nc_ws_sign_app/sign/`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -686,39 +686,51 @@ document.addEventListener('DOMContentLoaded', async function () {
         document.getElementById('canvas-container').style.height = h + 'px'
     }
 
-    window.Telegram.WebApp.MainButton.text = 'Готово';
-    window.Telegram.WebApp.MainButton.show();
-
-    window.Telegram.WebApp.MainButton.onClick(function () {
-        let result = getPositions()
-        if (result) {
-            if (result.signature_new) {
-                // Тут такой костыль, потому что телеграм не принимает более 4096 байт.
-                // Подпись мы уже отправили на сервер при сохрании нарисованной.
-                result.signature_new = ''
-            }
-            const data = JSON.stringify(result)
-            const sz = new Blob([data]).size
-            if (sz > 4096) {
-                window.Telegram.WebApp.showPopup({
-                    title: "Ошибка",
-                    message: "Слишком большой размер подписи: " + sz,
-                    buttons: [{type: "ok"}]
-                })
-                return
-            }
-            window.Telegram.WebApp.sendData(data);
-            window.Telegram.WebApp.close();
-        } else {
-            window.Telegram.WebApp.showPopup({
-                title: "Ошибка",
-                message: "Ошибка",
-                buttons: [{type: "ok"}]
-            });
-        }
+    // Простая загрузка файла
+    document.getElementById('upload-button').addEventListener('click', function () {
+        document.getElementById('file-upload').click();
     });
 
-    let response = await fetch(`/payload/${chat_id}?session_id=${session_id}`);
+    document.getElementById('file-upload').addEventListener('change', async function (e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        // Проверка на PDF
+        if (!file.name.toLowerCase().endsWith('.pdf')) {
+            alert('Пожалуйста, выберите PDF файл');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const response = await fetch('/exapps/nc_ws_sign_app/upload', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) throw new Error('Ошибка загрузки');
+
+            const data = await response.json();
+            pages = data.payload || []
+            if (pages.length > 0) {
+                let f = dataURLtoFile(pages[0].data, 'page_0.png')
+                loadBackgroundImage(f, pages[0].orientation, w, h)
+            }
+            signatureExists = data.sign
+
+            alert('Файл загружен успешно');
+        } catch (error) {
+            console.error('Upload error:', error);
+            alert('Ошибка при загрузке файла');
+        }
+
+        // Очищаем input
+        e.target.value = '';
+    });
+
+    let response = await fetch(`/exapps/nc_ws_sign_app/payload/?session_id=${session_id}`);
 
     if (response.ok) { // если HTTP-статус в диапазоне 200-299
         // получаем тело ответа (см. про этот метод ниже)
@@ -729,8 +741,6 @@ document.addEventListener('DOMContentLoaded', async function () {
             loadBackgroundImage(f, pages[0].orientation, w, h)
         }
         signatureExists = json.sign
-        stampPravilaExists = json.pravila_pechat
-        stampRpExists = json.ruspriority_pechat
     } else {
         alert("Ошибка HTTP: " + response.status);
     }

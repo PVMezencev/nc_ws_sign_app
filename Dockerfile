@@ -17,6 +17,7 @@ RUN apk update && \
     jpeg \
     openjpeg \
     tiff \
+    poppler-utils \
     lcms2 && \
     adduser -D $USER && \
     touch /frpc.toml && \
@@ -63,5 +64,10 @@ RUN chmod +x /start.sh && \
   pip install -U pip && \
   pip install -r requirements.txt
 
+
+# Создаём нужные директории с правильными правами
+RUN mkdir -p /nc_app_nc_ws_sign_app_data/data && \
+    chmod -R 777 /nc_app_nc_ws_sign_app_data && \
+    chown -R $USER:$USER /nc_app_nc_ws_sign_app_data
 
 ENTRYPOINT ["/bin/sh", "-c", "exec gosu \"$USER\" /start.sh python3 main.py"]

@@ -1,22 +1,27 @@
 import base64
 import io
 import json
+import os
 import shutil
+import typing
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from fastapi import FastAPI, Request, Depends, HTTPException
+from fastapi import FastAPI, Request, Depends, HTTPException, UploadFile, File
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from nc_py_api import NextcloudApp
-from nc_py_api.ex_app import LogLvl, set_handlers, persistent_storage
+from nc_py_api import NextcloudApp, AsyncNextcloudApp
+from nc_py_api.ex_app import LogLvl, set_handlers, persistent_storage, anc_app
+from pandas.io.sas.sas_constants import magic
 from pydantic import BaseModel
-from starlette.responses import StreamingResponse
+from starlette.responses import StreamingResponse, RedirectResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pdf2image import convert_from_bytes
 
-from src.editor import add_png_pdfrw, convert_scanned_pdf_to_pdf
+from src.editor import add_png_pdfrw, convert_scanned_pdf_to_pdf, create_image_reader
 
 # Константы
 APP_NAME = "nc_ws_sign_app"
@@ -72,6 +77,13 @@ APP = FastAPI(
     lifespan=lifespan
 )
 
+APP.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://cloud.zaosmm.ru"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Middleware, который пропускает heartbeat
 # class CustomAppAPIMiddleware(AppAPIAuthMiddleware):
@@ -124,75 +136,112 @@ def get_session_dir(user_id: str, session_id: str) -> Path:
     return session_dir
 
 
-# Эндпоинты
-@APP.get("/")
-async def index(request: Request, nc: NextcloudApp = Depends(NextcloudApp)):
-    """Главная страница приложения"""
-    user = nc.user
+@APP.post("/upload")
+async def upload_file(
+        request: Request,
+        nc: typing.Annotated[AsyncNextcloudApp, Depends(anc_app)],
+        file: UploadFile = File(...),
+):
+    """Загрузка файла с фронтенда для редактирования"""
+    user = await nc.user
+
+    # Проверяем размер файла (например, максимум 50MB)
+    MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+    contents = await file.read()
+    if len(contents) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=400, detail="File too large (max 50MB)")
+
+    # Проверяем, что это PDF
+    # Способ 1: по расширению
+    if not file.filename.lower().endswith('.pdf'):
+        # Способ 2: по MIME типу (более надежно)
+        mime_type = magic.from_buffer(contents, mime=True)
+        if mime_type != 'application/pdf':
+            raise HTTPException(status_code=400, detail="Only PDF files are allowed")
 
     # Генерируем ID сессии
     session_id = str(uuid.uuid4())
+    session_dir = get_session_dir(user, session_id)
+    pdf_path = session_dir / f"{session_id}.pdf"
 
-    return templates.TemplateResponse(
-        request=request,
-        name="editor.html",
-        context={
-            "user": user,
-            "session_id": session_id,
-            "version": "1.0.0"
+    images = convert_from_bytes(contents)
+    payload = []
+    for num in range(len(images)):
+        img = images[num]
+
+        img_byte_arr = io.BytesIO()
+        img.save(img_byte_arr, format='PNG')
+        img_byte_arr = img_byte_arr.getvalue()
+        encoded_data = base64.b64encode(img_byte_arr)
+        item = {
+            'page': num,
+            'size': img.size,
+            'data': 'data:image/png;base64,' + encoded_data.decode(),
         }
-    )
+        if img.size[0] < img.size[1]:
+            item['orientation'] = 'portrait'
+        else:
+            item['orientation'] = 'landscape'
+        payload.append(item)
+    if len(payload) == 0:
+        raise HTTPException(status_code=400, detail="не удалось получить файл")
+
+    payload_fp = os.path.join(session_dir, f'{session_id}.json')
+    with open(payload_fp, 'w') as w:
+        w.write(json.dumps({'payload': payload}, ensure_ascii=False))
+
+    with open(pdf_path, 'wb') as w:
+        w.write(contents)
+
+    # Логируем успешную загрузку
+    await nc.log(LogLvl.ERROR, f"File uploaded: {file.filename}, size: {len(contents)} bytes")
+
+    return JSONResponse(content={'payload': payload})
 
 
-@APP.get("/file/{file_id}")
-async def edit_file(
-        request: Request,
-        file_id: int,
-        nc: NextcloudApp = Depends(NextcloudApp)
-):
-    """Редактирование конкретного файла"""
-    user = nc.user
-
-    # Получаем информацию о файле из Nextcloud
-    try:
-        file_info = nc.files.by_id(file_id)
-        if not file_info:
-            raise HTTPException(status_code=404, detail="File not found")
-
-        # Скачиваем файл
-        file_content = nc.files.download(file_info)
-
-        # Сохраняем во временную директорию
+@APP.get("/")
+async def start_editor(request: Request,
+                       nc: typing.Annotated[AsyncNextcloudApp, Depends(anc_app)],
+                       session_id: str | None = None):
+    user = await nc.user
+    if session_id is None:
         session_id = str(uuid.uuid4())
-        session_dir = get_session_dir(user, session_id)
-        pdf_path = session_dir / f"{session_id}.pdf"
-
-        with open(pdf_path, "wb") as f:
-            f.write(file_content)
-
         return templates.TemplateResponse(
             request=request,
             name="editor.html",
             context={
                 "user": user,
+                "chat_id": user,
                 "session_id": session_id,
-                "file_name": file_info.name,
-                "file_id": file_id,
                 "version": "1.0.0"
             }
         )
-    except Exception as e:
-        nc.log(LogLvl.ERROR, f"Error loading file: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+
+    session_dir = get_session_dir(user, session_id)
+    pdf_path = session_dir / f"{session_id}.pdf"
+
+    sign_fp = os.path.join(session_dir, f'{user}', 'new_sign.png')
+    has_sign = False
+    if os.path.exists(sign_fp):
+        has_sign = True
+    return templates.TemplateResponse(
+        request=request, name="editor.html",
+        context={
+            "session_id": session_id,
+            "chat_id": f'{user}',
+            "user": user,
+            'has_sign': has_sign,
+            'version': '1.0.2'}
+    )
 
 
-@APP.get("/payload/{session_id}")
+@APP.get("/payload/")
 async def get_payload(
         session_id: str,
-        nc: NextcloudApp = Depends(NextcloudApp)
+        nc: typing.Annotated[AsyncNextcloudApp, Depends(anc_app)]
 ):
     """Получение данных сессии"""
-    user = nc.user
+    user = await nc.user
     session_dir = get_session_dir(user, session_id)
     payload_file = session_dir / f"payload.json"
 
@@ -216,10 +265,10 @@ async def get_payload(
 async def save_payload(
         session_id: str,
         payload: dict,
-        nc: NextcloudApp = Depends(NextcloudApp)
+        nc: typing.Annotated[AsyncNextcloudApp, Depends(anc_app)]
 ):
     """Сохранение данных сессии"""
-    user = nc.user
+    user = await nc.user
     session_dir = get_session_dir(user, session_id)
     payload_file = session_dir / "payload.json"
 
@@ -233,10 +282,10 @@ async def save_payload(
 async def save_signature(
         session_id: str,
         result: Result,
-        nc: NextcloudApp = Depends(NextcloudApp)
+        nc: typing.Annotated[AsyncNextcloudApp, Depends(anc_app)]
 ):
     """Сохранение подписи"""
-    user = nc.user
+    user = await nc.user
     session_dir = get_session_dir(user, session_id)
 
     if result.signature_new:
@@ -254,10 +303,10 @@ async def save_signature(
 async def process_document(
         session_id: str,
         result: Result,
-        nc: NextcloudApp = Depends(NextcloudApp)
+        nc: typing.Annotated[AsyncNextcloudApp, Depends(anc_app)]
 ):
     """Обработка документа с подписями"""
-    user = nc.user
+    user = await nc.user
     session_dir = get_session_dir(user, session_id)
 
     # Сохраняем подпись, если есть
@@ -325,10 +374,10 @@ async def process_document(
 async def save_to_nextcloud(
         session_id: str,
         filename: str,
-        nc: NextcloudApp = Depends(NextcloudApp)
+        nc: typing.Annotated[AsyncNextcloudApp, Depends(anc_app)]
 ):
     """Сохранение результата в Nextcloud"""
-    user = nc.user
+    user = await nc.user
     session_dir = get_session_dir(user, session_id)
     result_file = session_dir / "result.pdf"
 
@@ -353,20 +402,102 @@ async def save_to_nextcloud(
             "path": save_path
         })
     except Exception as e:
-        nc.log(LogLvl.ERROR, f"Error saving file: {str(e)}")
+        await nc.log(LogLvl.ERROR, f"Error saving file: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @APP.delete("/cleanup/{session_id}")
 async def cleanup_session(
         session_id: str,
-        nc: NextcloudApp = Depends(NextcloudApp)
+        nc: typing.Annotated[AsyncNextcloudApp, Depends(anc_app)]
 ):
     """Очистка временных файлов сессии"""
-    user = nc.user
+    user = await nc.user
     session_dir = get_session_dir(user, session_id)
 
     if session_dir.exists():
         shutil.rmtree(session_dir)
 
     return JSONResponse(content={"message": "Cleaned up"})
+
+
+@APP.post("/result")
+async def result(result: Result,
+                 nc: typing.Annotated[AsyncNextcloudApp, Depends(anc_app)],
+                 session_id: str | None = None):
+    user = await nc.user
+    res = result.model_dump()
+    new_sign = res.get('signature_new')
+    page = res.get('page')
+    positions = res.get('positions')
+    page_size = res.get('page_size')
+    page_w = page_size.get('w')
+    page_h = page_size.get('h')
+
+    session_dir = get_session_dir(user, session_id)
+    pdf_path = session_dir / f"{session_id}.pdf"
+    sign_fp = os.path.join(session_dir, f'{user}', 'new_sign.png')
+    if new_sign and new_sign != '':
+        with open(sign_fp, 'wb') as wr:
+            im_bytes = base64.b64decode(new_sign.replace('data:image/png;base64,', ''))
+            wr.write(im_bytes)
+
+    with open(pdf_path, 'rb') as rdr:
+        signet = rdr.read()
+    signet = convert_scanned_pdf_to_pdf(signet)
+    for pos in positions:
+        top = pos.get('top')
+        left = pos.get('left')
+        width = pos.get('width')
+        height = pos.get('height')
+        print(pos)
+        if pos.get('type') == 'sign':
+            if new_sign:
+                im_bytes = base64.b64decode(new_sign.replace('data:image/png;base64,', ''))
+                imgredr = create_image_reader(io.BytesIO(im_bytes))
+                signet = add_png_pdfrw(
+                    image=imgredr,
+                    input_data=signet,
+                    size=(width, height),
+                    position=(left, top),
+                    page_number=page,
+                    page_size=(page_w, page_h)
+                )
+            else:
+                sign_path = 'assets/images/sig_alla.png'
+                if os.path.exists(sign_fp):
+                    sign_path = sign_fp
+                signet = add_png_pdfrw(
+                    image=sign_path,
+                    input_data=signet,
+                    size=(width, height),
+                    position=(left, top),
+                    page_number=page,
+                    page_size=(page_w, page_h),
+                )
+        elif pos.get('type') == 'stamp_pravila':
+            signet = add_png_pdfrw(
+                image='assets/images/pravila_pechat.png',
+                input_data=signet,
+                size=(width, height),
+                position=(left, top),
+                page_number=page,
+                page_size=(page_w, page_h),
+            )
+        elif pos.get('type') == 'stamp_rp':
+            signet = add_png_pdfrw(
+                image='assets/images/ruspriority_pechat.png',
+                input_data=signet,
+                size=(width, height),
+                position=(left, top),
+                page_number=page,
+                page_size=(page_w, page_h),
+            )
+
+    sig_stamp_name = 'r_sig_stamp.pdf'
+
+    return StreamingResponse(
+        io.BytesIO(signet),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={sig_stamp_name}"}
+    )
