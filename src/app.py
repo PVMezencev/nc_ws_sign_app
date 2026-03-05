@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from nc_py_api import NextcloudApp
-from nc_py_api.ex_app import AppAPIAuthMiddleware, LogLvl, run_app, set_handlers, persistent_storage
+from nc_py_api.ex_app import LogLvl, set_handlers, persistent_storage
 from pydantic import BaseModel
 from starlette.responses import StreamingResponse
 
@@ -66,17 +66,28 @@ async def lifespan(app: FastAPI):
 
 
 # Создание приложения FastAPI
-app = FastAPI(
+APP = FastAPI(
     title="PDF Signer",
     version="1.0.0",
     lifespan=lifespan
 )
 
-# Middleware для аутентификации
-app.add_middleware(AppAPIAuthMiddleware)
+
+# Middleware, который пропускает heartbeat
+# class CustomAppAPIMiddleware(AppAPIAuthMiddleware):
+#     async def dispatch(self, request: Request, call_next):
+#         # Пропускаем heartbeat без проверки
+#         if request.url.path == "/heartbeat":
+#             return await call_next(request)
+#         # Для всех остальных - стандартная проверка
+#         return await super().dispatch(request, call_next)
+#
+#
+# # Middleware для аутентификации
+# APP.add_middleware(CustomAppAPIMiddleware)
 
 # Монтируем статические файлы
-app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)), name="assets")
+APP.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)), name="assets")
 
 # Шаблоны
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -114,7 +125,7 @@ def get_session_dir(user_id: str, session_id: str) -> Path:
 
 
 # Эндпоинты
-@app.get("/")
+@APP.get("/")
 async def index(request: Request, nc: NextcloudApp = Depends(NextcloudApp)):
     """Главная страница приложения"""
     user = nc.user
@@ -133,7 +144,7 @@ async def index(request: Request, nc: NextcloudApp = Depends(NextcloudApp)):
     )
 
 
-@app.get("/file/{file_id}")
+@APP.get("/file/{file_id}")
 async def edit_file(
         request: Request,
         file_id: int,
@@ -175,7 +186,7 @@ async def edit_file(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/payload/{session_id}")
+@APP.get("/payload/{session_id}")
 async def get_payload(
         session_id: str,
         nc: NextcloudApp = Depends(NextcloudApp)
@@ -201,7 +212,7 @@ async def get_payload(
     return JSONResponse(content=payload)
 
 
-@app.post("/save_payload/{session_id}")
+@APP.post("/save_payload/{session_id}")
 async def save_payload(
         session_id: str,
         payload: dict,
@@ -218,7 +229,7 @@ async def save_payload(
     return JSONResponse(content={"message": "OK"})
 
 
-@app.post("/sign/{session_id}")
+@APP.post("/sign/{session_id}")
 async def save_signature(
         session_id: str,
         result: Result,
@@ -239,7 +250,7 @@ async def save_signature(
     return JSONResponse(content={'message': 'OK'})
 
 
-@app.post("/process/{session_id}")
+@APP.post("/process/{session_id}")
 async def process_document(
         session_id: str,
         result: Result,
@@ -310,7 +321,7 @@ async def process_document(
     )
 
 
-@app.post("/save_to_nextcloud/{session_id}")
+@APP.post("/save_to_nextcloud/{session_id}")
 async def save_to_nextcloud(
         session_id: str,
         filename: str,
@@ -346,7 +357,7 @@ async def save_to_nextcloud(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/cleanup/{session_id}")
+@APP.delete("/cleanup/{session_id}")
 async def cleanup_session(
         session_id: str,
         nc: NextcloudApp = Depends(NextcloudApp)
@@ -359,24 +370,3 @@ async def cleanup_session(
         shutil.rmtree(session_dir)
 
     return JSONResponse(content={"message": "Cleaned up"})
-
-@app.get("/heartbeat")
-async def heartbeat():
-    """Обязательный endpoint для проверки здоровья"""
-    return {"status": "ok"}
-
-@app.post("/init")
-async def init_app(request: Request, nc: NextcloudApp = Depends(NextcloudApp)):
-    """Обязательный endpoint для инициализации приложения"""
-    # Здесь можно выполнить начальную настройку
-    return {"status": "initialized"}
-
-@app.put("/enabled")
-async def set_enabled(request: Request, nc: NextcloudApp = Depends(NextcloudApp)):
-    """Обязательный endpoint для включения/выключения приложения"""
-    data = await request.json()
-    enabled = data.get("enabled", False)
-    return {"status": "ok", "enabled": enabled}
-
-if __name__ == "__main__":
-    run_app("src.main:app", log_level="trace")

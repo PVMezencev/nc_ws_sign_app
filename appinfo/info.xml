@@ -20,6 +20,9 @@
         <job>OCA\WebServerSignDocApp\BackgroundJob\CleanupTempFiles</job>
     </background-jobs>
 
+	<website>https://github.com/zaosmm/nc_ws_sign_app</website>
+	<bugs>https://github.com/zaosmm/nc_ws_sign_app/issues</bugs>
+	<repository type="git">https://github.com/zaosmm/nc_ws_sign_app</repository>
     <settings>
         <admin>OCA\WebServerSignDocApp\Settings\Admin</admin>
     </settings>
@@ -30,6 +33,31 @@
             <image>zaosmm/nc_ws_sign_app</image>
             <image-tag>latest</image-tag>
         </docker-install>
+
+        <routes>
+            <route>
+                <url>.*</url>
+                <verb>GET,POST,PUT,DELETE,OPTIONS</verb>
+                <access_level>USER</access_level>
+                <headers_to_exclude>[]</headers_to_exclude>
+                <bruteforce_protection>[401, 500]</bruteforce_protection>
+            </route>
+            <route>
+                <url>/.*</url>
+                <verb>GET,POST,PUT,DELETE,OPTIONS</verb>
+                <access_level>USER</access_level>
+                <headers_to_exclude>[]</headers_to_exclude>
+                <bruteforce_protection>[401, 500]</bruteforce_protection>
+            </route>
+            <route>
+                <url>/</url>
+                <verb>GET,OPTIONS</verb>
+                <access_level>USER</access_level>
+                <headers_to_exclude>[]</headers_to_exclude>
+                <bruteforce_protection>[401, 500]</bruteforce_protection>
+            </route>
+        </routes>
+
     </external-app>
     <!-- Команда для запуска приложения -->
     <commands>
