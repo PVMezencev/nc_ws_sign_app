@@ -303,7 +303,7 @@ async def save_payload(
     return JSONResponse(content={"message": "OK"})
 
 
-@APP.post("/sign/")
+@APP.post("/sign")
 async def save_signature(
         result: Result,
         nc: typing.Annotated[AsyncNextcloudApp, Depends(anc_app)]
@@ -507,6 +507,38 @@ async def save_to_nextcloud(
             "message": "File saved successfully",
             "file_id": uploaded.file_id,
             "path": save_path
+        })
+    except Exception as e:
+        await nc.log(LogLvl.ERROR, f"Error saving file: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@APP.get("/preform_nextcloud")
+async def preform_nextcloud(
+        nc: typing.Annotated[AsyncNextcloudApp, Depends(anc_app)]
+):
+    """Сохранение результата в Nextcloud"""
+    user = await nc.user
+
+    # Сохраняем в домашнюю директорию пользователя
+    try:
+        # Получаем путь к папке Documents или создаем свою
+        preforms_dir = f"/Подпись документов/заготовки"
+
+        files = []
+        preforms = await nc.files.listdir(preforms_dir)
+        for node in preforms:
+            if node.is_dir:
+                pass
+            else:
+                content = await nc.files.download(node.user_path)
+                files.append({
+                    'name': node.name,
+                    'b64content': f'data:image/png;base64,{base64.b64encode(content).decode()}'
+                })
+
+        return JSONResponse(content={
+            "preforms": files
         })
     except Exception as e:
         await nc.log(LogLvl.ERROR, f"Error saving file: {str(e)}")

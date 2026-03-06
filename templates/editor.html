@@ -13,14 +13,21 @@
 
     <div class="upload-section">
         {% if has_sign %}
-        <button id="sign-exist-file">Вставить подпись</button>
+        <button id="sign-exist-file">Вставить предыдущую заготовку</button>
         {% endif %}
-        <input type="file" id="file-upload" accept=".pdf" style="display: none;">
+        <button id="preform-sync">Загрузить заготовки с облака</button>
+        <button id="preform-upload">Загрузить заготовку с диска</button>
+        <input type="file" id="sign-upload" accept=".png" style="display: none;">
+
         <button id="upload-button" style="background: #007bff;">📤 Загрузить PDF</button>
+        <input type="file" id="file-upload" accept=".pdf" style="display: none;">
+
         <button id="start-signature-canvas" style="background: #28a745;">🎨 Нарисовать подпись</button>
         <button id="get-positions">✅ Применить</button>
         <button id="zoom_plus" class="zoom_control">+</button>
         <button id="zoom_minus" class="zoom_control">-</button>
+    </div>
+    <div id="buttons-container">
     </div>
 </div>
 

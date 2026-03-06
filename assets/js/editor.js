@@ -498,7 +498,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             // Также можно получить base64 для сохранения
             signatureNew = dataURL
 
-            saveNewSign({signature_new: signatureNew}, chat_id)
+            saveNewSign({signature_new: signatureNew})
 
             // Или получить как ArrayBuffer
             getSignatureAsArrayBuffer(dataURL);
@@ -555,6 +555,12 @@ document.addEventListener('DOMContentLoaded', async function () {
         }
     }
 
+    function convertToBase64(file, onSuccess) {
+        const reader = new FileReader();
+        reader.onload = () => onSuccess(reader.result);
+        reader.readAsDataURL(file);
+    }
+
     async function downloadFile(data, chat_id, session_id, filename = 'document.pdf') {
         try {
             const response = await fetch(`/exapps/nc_ws_sign_app/document-result?session_id=${session_id}`, {
@@ -606,9 +612,9 @@ document.addEventListener('DOMContentLoaded', async function () {
         }
     }
 
-    async function saveNewSign(data, chat_id) {
+    async function saveNewSign(data) {
         try {
-            const response = await fetch(`/exapps/nc_ws_sign_app/sign/`, {
+            const response = await fetch(`/exapps/nc_ws_sign_app/sign`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -626,6 +632,45 @@ document.addEventListener('DOMContentLoaded', async function () {
         }
     }
 
+    // Получаем данные и создаем кнопки
+    async function loadAndRenderButtons() {
+        try {
+            // Делаем запрос
+            const response = await fetch('/exapps/nc_ws_sign_app/preform_nextcloud');
+            const data = await response.json();
+
+            // Находим контейнер для кнопок
+            const container = document.getElementById('buttons-container');
+
+            // Очищаем контейнер
+            container.innerHTML = '';
+
+            // Создаем кнопки для каждого preform
+            data.preforms.forEach(item => {
+                // Создаем кнопку
+                const button = document.createElement('button');
+                button.textContent = item.name;
+                button.className = 'preform-button'; // опционально, для стилизации
+
+                // Добавляем обработчик клика
+                button.addEventListener('click', async () => await handleButtonClick(item.b64content, item.name));
+
+                // Добавляем кнопку в контейнер
+                container.appendChild(button);
+            });
+
+        } catch (error) {
+            console.error('Ошибка при загрузке данных:', error);
+        }
+    }
+
+// Функция-обработчик клика
+    async function handleButtonClick(b64content, name) {
+        signatureExists = b64content
+        let f = dataURLtoFile(b64content, 'sign.png')
+        loadImageToCanvas(f, 'sign');
+        await saveNewSign({signature_new: b64content});
+    }
 
     document.getElementById('clear-signature').onclick = function () {
         clearSignature()
@@ -653,6 +698,7 @@ document.addEventListener('DOMContentLoaded', async function () {
     document.getElementById('next-page').onclick = function () {
         nextPage()
     }
+
     let signExistFileBtn = document.getElementById('sign-exist-file')
     if (signExistFileBtn) {
         signExistFileBtn.onclick = function () {
@@ -660,6 +706,40 @@ document.addEventListener('DOMContentLoaded', async function () {
             loadImageToCanvas(f, 'sign');
         }
     }
+
+    let preformSyncBtn = document.getElementById('preform-sync')
+    if (preformSyncBtn) {
+        preformSyncBtn.onclick = async function () {
+            await loadAndRenderButtons()
+        }
+    }
+
+    let preformUploadBtn = document.getElementById('preform-upload')
+    if (preformUploadBtn) {
+        preformUploadBtn.onclick = function () {
+            document.getElementById('sign-upload').click();
+        }
+
+        document.getElementById('sign-upload').addEventListener('change', async function (e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            // Проверка на PDF
+            if (!file.name.toLowerCase().endsWith('.png')) {
+                alert('Пожалуйста, выберите PDF файл');
+                return;
+            }
+
+            convertToBase64(file, (base64) => {
+                addSignatureToMainCanvas(base64);
+                saveNewSign({signature_new: signatureNew})
+            })
+
+            // Очищаем input
+            e.target.value = '';
+        });
+    }
+
     document.getElementById('zoom_plus').onclick = function () {
         let cw = canvas.width;
         let ch = canvas.height;
@@ -742,5 +822,7 @@ document.addEventListener('DOMContentLoaded', async function () {
     } else {
         alert("Ошибка HTTP: " + response.status);
     }
+
+    await loadAndRenderButtons()
 
 });
