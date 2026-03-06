@@ -7,7 +7,6 @@ document.addEventListener('DOMContentLoaded', async function () {
     let currentPageIndex = 0;
     let currentPageOrieentation = 'portrait';
     let pages = [];
-    let signatureExists;
     let signatureNew;
     let stampPravilaExists;
     let stampRpExists;
@@ -558,7 +557,7 @@ document.addEventListener('DOMContentLoaded', async function () {
 
     async function downloadFile(data, chat_id, session_id, filename = 'document.pdf') {
         try {
-            const response = await fetch(`/exapps/nc_ws_sign_app/result/?session_id=${session_id}`, {
+            const response = await fetch(`/exapps/nc_ws_sign_app/document-result?session_id=${session_id}`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -719,8 +718,7 @@ document.addEventListener('DOMContentLoaded', async function () {
                 loadBackgroundImage(f, pages[0].orientation, w, h)
             }
             signatureExists = data.sign
-
-            alert('Файл загружен успешно');
+            session_id = data.session_id || ''
         } catch (error) {
             console.error('Upload error:', error);
             alert('Ошибка при загрузке файла');

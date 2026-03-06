@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from nc_py_api import NextcloudApp, AsyncNextcloudApp
-from nc_py_api.ex_app import LogLvl, set_handlers, persistent_storage, anc_app
+from nc_py_api.ex_app import LogLvl, set_handlers, persistent_storage, anc_app, AppAPIAuthMiddleware
 from pandas.io.sas.sas_constants import magic
 from pydantic import BaseModel
 from starlette.responses import StreamingResponse, RedirectResponse
@@ -34,6 +34,8 @@ TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
+SIGN_FILE = 'new_sign.png'
+
 
 # Очистка старых временных файлов (раз в день)
 def cleanup_old_files():
@@ -41,6 +43,13 @@ def cleanup_old_files():
     now = datetime.now()
     for item in TEMP_DIR.iterdir():
         if item.is_file():
+            mtime = datetime.fromtimestamp(item.stat().st_mtime)
+            if now - mtime > timedelta(hours=24):
+                item.unlink()
+    for item in DATA_DIR.iterdir():
+        if item.is_file():
+            if item.suffix not in ['.pdf', '.json']:
+                continue
             mtime = datetime.fromtimestamp(item.stat().st_mtime)
             if now - mtime > timedelta(hours=24):
                 item.unlink()
@@ -85,18 +94,19 @@ APP.add_middleware(
     allow_headers=["*"],
 )
 
+
 # Middleware, который пропускает heartbeat
-# class CustomAppAPIMiddleware(AppAPIAuthMiddleware):
-#     async def dispatch(self, request: Request, call_next):
-#         # Пропускаем heartbeat без проверки
-#         if request.url.path == "/heartbeat":
-#             return await call_next(request)
-#         # Для всех остальных - стандартная проверка
-#         return await super().dispatch(request, call_next)
-#
-#
-# # Middleware для аутентификации
-# APP.add_middleware(CustomAppAPIMiddleware)
+class CustomAppAPIMiddleware(AppAPIAuthMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # Пропускаем heartbeat без проверки
+        if request.url.path == "/heartbeat":
+            return await call_next(request)
+        # Для всех остальных - стандартная проверка
+        return await super().dispatch(request, call_next)
+
+
+# Middleware для аутентификации
+APP.add_middleware(CustomAppAPIMiddleware)
 
 # Монтируем статические файлы
 APP.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)), name="assets")
@@ -196,7 +206,15 @@ async def upload_file(
     # Логируем успешную загрузку
     await nc.log(LogLvl.ERROR, f"File uploaded: {file.filename}, size: {len(contents)} bytes")
 
-    return JSONResponse(content={'payload': payload})
+    user_dir = get_user_dir(user)
+    sign_fp = Path(os.path.join(user_dir, SIGN_FILE))
+    sign = ''
+    if sign_fp.exists():
+        with open(sign_fp, 'rb') as f:
+            encoded = base64.b64encode(f.read()).decode()
+            sign = f'data:image/png;base64,{encoded}'
+
+    return JSONResponse(content={'payload': payload, 'session_id': session_id, 'sign': sign})
 
 
 @APP.get("/")
@@ -204,6 +222,16 @@ async def start_editor(request: Request,
                        nc: typing.Annotated[AsyncNextcloudApp, Depends(anc_app)],
                        session_id: str | None = None):
     user = await nc.user
+    # Добавляем подпись, если есть
+    has_sign = False
+    user_dir = get_user_dir(user)
+    sign_fp = Path(os.path.join(user_dir, SIGN_FILE))
+    sign = ''
+    if sign_fp.exists():
+        has_sign = True
+        with open(sign_fp, 'rb') as f:
+            encoded = base64.b64encode(f.read()).decode()
+            sign = f'data:image/png;base64,{encoded}'
     if session_id is None:
         session_id = str(uuid.uuid4())
         return templates.TemplateResponse(
@@ -213,17 +241,12 @@ async def start_editor(request: Request,
                 "user": user,
                 "chat_id": user,
                 "session_id": session_id,
+                'has_sign': has_sign,
+                'sign': sign,
                 "version": "1.0.0"
             }
         )
 
-    session_dir = get_session_dir(user, session_id)
-    pdf_path = session_dir / f"{session_id}.pdf"
-
-    sign_fp = os.path.join(session_dir, f'{user}', 'new_sign.png')
-    has_sign = False
-    if os.path.exists(sign_fp):
-        has_sign = True
     return templates.TemplateResponse(
         request=request, name="editor.html",
         context={
@@ -231,6 +254,7 @@ async def start_editor(request: Request,
             "chat_id": f'{user}',
             "user": user,
             'has_sign': has_sign,
+            'sign': sign,
             'version': '1.0.2'}
     )
 
@@ -243,18 +267,19 @@ async def get_payload(
     """Получение данных сессии"""
     user = await nc.user
     session_dir = get_session_dir(user, session_id)
-    payload_file = session_dir / f"payload.json"
+    payload_fp = Path(os.path.join(session_dir, f'{session_id}.json'))
 
-    if not payload_file.exists():
+    if not payload_fp.exists():
         return JSONResponse(content={})
 
-    with open(payload_file, 'r') as f:
+    with open(payload_fp, 'r') as f:
         payload = json.load(f)
 
     # Добавляем подпись, если есть
-    sign_file = session_dir / "signature.png"
-    if sign_file.exists():
-        with open(sign_file, 'rb') as f:
+    user_dir = get_user_dir(user)
+    sign_fp = Path(os.path.join(user_dir, SIGN_FILE))
+    if sign_fp.exists():
+        with open(sign_fp, 'rb') as f:
             encoded = base64.b64encode(f.read()).decode()
             payload['sign'] = f'data:image/png;base64,{encoded}'
 
@@ -278,18 +303,17 @@ async def save_payload(
     return JSONResponse(content={"message": "OK"})
 
 
-@APP.post("/sign/{session_id}")
+@APP.post("/sign/")
 async def save_signature(
-        session_id: str,
         result: Result,
         nc: typing.Annotated[AsyncNextcloudApp, Depends(anc_app)]
 ):
     """Сохранение подписи"""
     user = await nc.user
-    session_dir = get_session_dir(user, session_id)
+    user_dir = get_user_dir(user)
 
     if result.signature_new:
-        sign_file = session_dir / "signature.png"
+        sign_file = user_dir / SIGN_FILE
         img_data = base64.b64decode(
             result.signature_new.replace('data:image/png;base64,', '')
         )
@@ -297,6 +321,89 @@ async def save_signature(
             f.write(img_data)
 
     return JSONResponse(content={'message': 'OK'})
+
+
+@APP.post("/document-result")
+async def result(result: Result,
+                 nc: typing.Annotated[AsyncNextcloudApp, Depends(anc_app)],
+                 session_id: str | None = None):
+    user = await nc.user
+    res = result.model_dump()
+    new_sign = res.get('signature_new')
+    page = res.get('page')
+    positions = res.get('positions')
+    page_size = res.get('page_size')
+    page_w = page_size.get('w')
+    page_h = page_size.get('h')
+
+    session_dir = get_session_dir(user, session_id)
+    user_dir = get_user_dir(user)
+    pdf_path = session_dir / f"{session_id}.pdf"
+    sign_fp = os.path.join(user_dir, SIGN_FILE)
+    if new_sign and new_sign != '':
+        with open(sign_fp, 'wb') as wr:
+            im_bytes = base64.b64decode(new_sign.replace('data:image/png;base64,', ''))
+            wr.write(im_bytes)
+
+    with open(pdf_path, 'rb') as rdr:
+        signet = rdr.read()
+    signet = convert_scanned_pdf_to_pdf(signet)
+    for pos in positions:
+        top = pos.get('top')
+        left = pos.get('left')
+        width = pos.get('width')
+        height = pos.get('height')
+        print(pos)
+        if pos.get('type') == 'sign':
+            if new_sign:
+                im_bytes = base64.b64decode(new_sign.replace('data:image/png;base64,', ''))
+                imgredr = create_image_reader(io.BytesIO(im_bytes))
+                signet = add_png_pdfrw(
+                    image=imgredr,
+                    input_data=signet,
+                    size=(width, height),
+                    position=(left, top),
+                    page_number=page,
+                    page_size=(page_w, page_h)
+                )
+            else:
+                sign_path = 'assets/images/sig_alla.png'
+                if os.path.exists(sign_fp):
+                    sign_path = sign_fp
+                signet = add_png_pdfrw(
+                    image=sign_path,
+                    input_data=signet,
+                    size=(width, height),
+                    position=(left, top),
+                    page_number=page,
+                    page_size=(page_w, page_h),
+                )
+        elif pos.get('type') == 'stamp_pravila':
+            signet = add_png_pdfrw(
+                image='assets/images/pravila_pechat.png',
+                input_data=signet,
+                size=(width, height),
+                position=(left, top),
+                page_number=page,
+                page_size=(page_w, page_h),
+            )
+        elif pos.get('type') == 'stamp_rp':
+            signet = add_png_pdfrw(
+                image='assets/images/ruspriority_pechat.png',
+                input_data=signet,
+                size=(width, height),
+                position=(left, top),
+                page_number=page,
+                page_size=(page_w, page_h),
+            )
+
+    sig_stamp_name = 'r_sig_stamp.pdf'
+
+    return StreamingResponse(
+        io.BytesIO(signet),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={sig_stamp_name}"}
+    )
 
 
 @APP.post("/process/{session_id}")
@@ -419,85 +526,3 @@ async def cleanup_session(
         shutil.rmtree(session_dir)
 
     return JSONResponse(content={"message": "Cleaned up"})
-
-
-@APP.post("/result")
-async def result(result: Result,
-                 nc: typing.Annotated[AsyncNextcloudApp, Depends(anc_app)],
-                 session_id: str | None = None):
-    user = await nc.user
-    res = result.model_dump()
-    new_sign = res.get('signature_new')
-    page = res.get('page')
-    positions = res.get('positions')
-    page_size = res.get('page_size')
-    page_w = page_size.get('w')
-    page_h = page_size.get('h')
-
-    session_dir = get_session_dir(user, session_id)
-    pdf_path = session_dir / f"{session_id}.pdf"
-    sign_fp = os.path.join(session_dir, f'{user}', 'new_sign.png')
-    if new_sign and new_sign != '':
-        with open(sign_fp, 'wb') as wr:
-            im_bytes = base64.b64decode(new_sign.replace('data:image/png;base64,', ''))
-            wr.write(im_bytes)
-
-    with open(pdf_path, 'rb') as rdr:
-        signet = rdr.read()
-    signet = convert_scanned_pdf_to_pdf(signet)
-    for pos in positions:
-        top = pos.get('top')
-        left = pos.get('left')
-        width = pos.get('width')
-        height = pos.get('height')
-        print(pos)
-        if pos.get('type') == 'sign':
-            if new_sign:
-                im_bytes = base64.b64decode(new_sign.replace('data:image/png;base64,', ''))
-                imgredr = create_image_reader(io.BytesIO(im_bytes))
-                signet = add_png_pdfrw(
-                    image=imgredr,
-                    input_data=signet,
-                    size=(width, height),
-                    position=(left, top),
-                    page_number=page,
-                    page_size=(page_w, page_h)
-                )
-            else:
-                sign_path = 'assets/images/sig_alla.png'
-                if os.path.exists(sign_fp):
-                    sign_path = sign_fp
-                signet = add_png_pdfrw(
-                    image=sign_path,
-                    input_data=signet,
-                    size=(width, height),
-                    position=(left, top),
-                    page_number=page,
-                    page_size=(page_w, page_h),
-                )
-        elif pos.get('type') == 'stamp_pravila':
-            signet = add_png_pdfrw(
-                image='assets/images/pravila_pechat.png',
-                input_data=signet,
-                size=(width, height),
-                position=(left, top),
-                page_number=page,
-                page_size=(page_w, page_h),
-            )
-        elif pos.get('type') == 'stamp_rp':
-            signet = add_png_pdfrw(
-                image='assets/images/ruspriority_pechat.png',
-                input_data=signet,
-                size=(width, height),
-                position=(left, top),
-                page_number=page,
-                page_size=(page_w, page_h),
-            )
-
-    sig_stamp_name = 'r_sig_stamp.pdf'
-
-    return StreamingResponse(
-        io.BytesIO(signet),
-        media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename={sig_stamp_name}"}
-    )
