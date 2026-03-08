@@ -61,6 +61,6 @@
     </external-app>
     <!-- Команда для запуска приложения -->
     <commands>
-        <command>python3 src/main.py</command>
+        <command>python3 main.py</command>
     </commands>
 </info>
