@@ -6,7 +6,7 @@
     <description>Приложение для добавления подписей в PDF документы</description>
     <version>1.0.0</version>
     <licence>agpl</licence>
-    <author mail="u0827@zaosmm.ru">Мезенцев Павел Викентьевич</author>
+    <author mail="pvmezencev@yandex.ru">Мезенцев Павел Викентьевич</author>
     <namespace>WebServerSignDocApp</namespace>
     <category>tools</category>
 
@@ -20,9 +20,9 @@
         <job>OCA\WebServerSignDocApp\BackgroundJob\CleanupTempFiles</job>
     </background-jobs>
 
-	<website>https://github.com/zaosmm/nc_ws_sign_app</website>
-	<bugs>https://github.com/zaosmm/nc_ws_sign_app/issues</bugs>
-	<repository type="git">https://github.com/zaosmm/nc_ws_sign_app</repository>
+	<website>https://github.com/PVMezencev/nc_ws_sign_app</website>
+	<bugs>https://github.com/PVMezencev/nc_ws_sign_app/issues</bugs>
+	<repository type="git">https://github.com/PVMezencev/nc_ws_sign_app</repository>
     <settings>
         <admin>OCA\WebServerSignDocApp\Settings\Admin</admin>
     </settings>
@@ -30,7 +30,7 @@
     <external-app>
         <docker-install>
             <registry>ghcr.io</registry>
-            <image>zaosmm/nc_ws_sign_app</image>
+            <image>pvmezencev/nc_ws_sign_app</image>
             <image-tag>latest</image-tag>
         </docker-install>
 
